@@ -1,0 +1,1897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anmol Shopping List</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Gujarati:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+    :root {
+        --primary: #f97316;
+        --primary-dark: #ea580c;
+        --secondary: #ec4899;
+        --bg: #f8fafc;
+        --card: #ffffff;
+        --text: #0f172a;
+        --text-muted: #64748b;
+        --border: #e2e8f0;
+        --success: #22c55e;
+    }
+    
+    .dark {
+        --bg: #0f172a;
+        --card: #1e293b;
+        --text: #f1f5f9;
+        --text-muted: #94a3b5;
+        --border: #334155;
+    }
+
+    * {
+        font-family: 'Inter', 'Noto Sans Gujarati', sans-serif;
+        -webkit-tap-highlight-color: transparent;
+    }
+    
+    body {
+        background: var(--bg);
+        color: var(--text);
+        transition: background 0.3s, color 0.3s;
+    }
+    
+    .gujarati {
+        font-family: 'Noto Sans Gujarati', sans-serif;
+    }
+    
+    .mono {
+        font-family: 'JetBrains Mono', monospace;
+    }
+    
+    .gradient-bg {
+        background: linear-gradient(135deg, #f97316 0%, #ec4899 100%);
+    }
+    
+    .gradient-text {
+        background: linear-gradient(135deg, #f97316 0%, #ec4899 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        transition: all 0.3s;
+    }
+    
+    .card:hover {
+        box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+        transform: translateY(-2px);
+    }
+    
+    .dark .card:hover {
+        box-shadow: 0 10px 25px -5px rgba(0,0,0,0.4);
+    }
+    
+    .stat-card {
+        background: linear-gradient(135deg, var(--card) 0%, rgba(249,115,22,0.05) 100%);
+    }
+    
+    .chip {
+        transition: all 0.2s;
+    }
+    
+    .chip.active {
+        background: linear-gradient(135deg, #f97316 0%, #ec4899 100%);
+        color: white;
+        box-shadow: 0 4px 14px 0 rgba(249,115,22,0.3);
+    }
+    
+    .bottom-nav-item.active {
+        color: var(--primary);
+    }
+
+    .bottom-nav-item.active svg {
+        fill: var(--primary);
+        stroke: var(--primary);
+    }
+    
+    .checkbox:checked {
+        background: var(--success);
+        border-color: var(--success);
+    }
+    
+    .modal-backdrop {
+        backdrop-filter: blur(4px);
+        background: rgba(0,0,0,0.5);
+    }
+    
+    @keyframes slideUp {
+        from {
+            transform: translateY(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+    
+    .slide-up {
+        animation: slideUp 0.3s ease-out;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    
+    .fade-in {
+        animation: fadeIn 0.2s ease-out;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    
+    .item-bought {
+        opacity: 0.6;
+    }
+    
+    .item-bought .item-name {
+        text-decoration: line-through;
+    }
+
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    
+    input[type="number"] {
+        -moz-appearance: textfield;
+    }
+
+    .menu-popup {
+        position: absolute;
+        right: 0;
+        top: 100%;
+        margin-top: 4px;
+        z-index: 50;
+    }
+
+    .list-item-card {
+        background: var(--card);
+    }
+
+    .pink-btn {
+        background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
+    }
+
+    .print-content {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #000;
+        background: white;
+        padding: 20px;
+        max-width: 100%;
+        overflow-x: auto;
+    }
+
+    .print-modal-content {
+        max-height: 70vh;
+        overflow-y: auto;
+    }
+
+    @media print {
+        body * {
+            visibility: hidden;
+        }
+        .print-content, .print-content * {
+            visibility: visible;
+        }
+        .print-content {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+        }
+        .no-print {
+            display: none !important;
+        }
+    }
+
+    @media screen and (max-width: 390px) {
+        .print-content {
+            font-size: 10px;
+            padding: 10px;
+        }
+    }
+</style>
+</head>
+<body class="pb-20">
+    <!-- Header -->
+    <header class="bg-black text-white sticky top-0 z-40 shadow-lg">
+        <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+            <h1 class="text-lg font-bold tracking-wide">ANMOL SHOPPING LIST</h1>
+            <div class="flex items-center gap-3">
+                <button id="darkModeToggle" class="p-2 rounded-full hover:bg-white/10 transition">
+                    <svg id="sunIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                    </svg>
+                    <svg id="moonIcon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 0 0012 21a9.003 0 008.354-5.646z"></path>
+                    </svg>
+                </button>
+                <div id="actsLogo" class="w-10 h-10 rounded-full gradient-bg flex items-center justify-center font-bold text-sm select-none">ACTS</div>
+            </div>
+        </div>
+        <div class="text-center text-xs pb-2 text-white/70">ANMOL CHILDRENWEAR & TOY SHOP</div>
+    </header>
+
+    <main class="max-w-2xl mx-auto px-4 py-4">
+        <!-- Home View -->
+        <div id="homeView" class="view">
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-3 gap-3 mb-4">
+                <div class="card stat-card rounded-2xl p-4">
+                    <div class="text-xs text-[var(--text-muted)] mb-1">Total Items</div>
+                    <div id="totalItems" class="text-2xl font-bold gradient-text">0</div>
+                </div>
+                <div class="card stat-card rounded-2xl p-4">
+                    <div class="text-xs text-[var(--text-muted)] mb-1">Bought</div>
+                    <div id="boughtItems" class="text-2xl font-bold text-green-600">0/0</div>
+                </div>
+                <div class="card stat-card rounded-2xl p-4">
+                    <div class="text-xs text-[var(--text-muted)] mb-1">Total Amount</div>
+                    <div id="totalAmount" class="text-2xl font-bold gradient-text">₹0</div>
+                </div>
+            </div>
+
+            <!-- Save List Button -->
+            <button id="saveListBtn" class="gradient-bg w-full py-3 rounded-xl text-white font-semibold mb-4 shadow-lg shadow-orange-500/30 hover:shadow-xl hover:shadow-orange-500/40 transition flex items-center justify-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
+                </svg>
+                Save List
+            </button>
+
+            <!-- Category Filter Chips -->
+            <div class="flex gap-2 mb-4 overflow-x-auto pb-2" id="homeCategoryChips"></div>
+
+            <!-- Items List -->
+            <div id="homeItemsList" class="space-y-4"></div>
+        </div>
+
+        <!-- List View -->
+        <div id="listView" class="view hidden">
+            <div class="mb-4">
+                <input type="text" id="searchInput" placeholder="Search by name..." class="card w-full px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+            </div>
+            
+            <div class="mb-4">
+                <select id="filterCategory" class="card w-full px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="all">All Categories</option>
+                </select>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 mb-4">
+                <button id="exportBtn" class="card px-3 py-2 rounded-lg text-xs font-medium hover:bg-orange-50 dark:hover:bg-orange-900/20 transition">Export</button>
+                <button id="importBtn" class="card px-3 py-2 rounded-lg text-xs font-medium hover:bg-orange-50 dark:hover:bg-orange-900/20 transition">Import</button>
+                <input type="file" id="importFile" accept=".json" class="hidden">
+                <button id="backupBtn" class="card px-3 py-2 rounded-lg text-xs font-medium hover:bg-orange-50 dark:hover:bg-orange-900/20 transition">Backup</button>
+            </div>
+
+            <button id="addItemBtn" class="gradient-bg w-full py-3 rounded-xl text-white font-semibold mb-4 shadow-lg shadow-orange-500/30 hover:shadow-xl hover:shadow-orange-500/40 transition">
+                + Add Item
+            </button>
+
+            <div id="listItemsList" class="space-y-3"></div>
+        </div>
+
+        <!-- Category View -->
+        <div id="categoryView" class="view hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-bold">Categories <span id="categoryCount" class="text-[var(--text-muted)] text-base">2</span></h2>
+            </div>
+
+            <button id="addCategoryBtn" class="gradient-bg w-full py-3 rounded-xl text-white font-semibold mb-4 shadow-lg shadow-orange-500/30 hover:shadow-xl hover:shadow-orange-500/40 transition">
+                + Add Category
+            </button>
+
+            <div id="categoriesList" class="space-y-3"></div>
+        </div>
+
+        <!-- Payment View -->
+        <div id="paymentView" class="view hidden">
+            <h2 class="text-xl font-bold mb-4">Payment</h2>
+            
+            <!-- Top Cards -->
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div class="card stat-card rounded-2xl p-4">
+                    <div class="text-xs text-[var(--text-muted)] mb-2">Total Amount</div>
+                    <div class="relative">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-[var(--text-muted)]">₹</span>
+                        <input type="number" id="totalAmountInput" min="0" placeholder="0" class="w-full pl-8 pr-3 py-2 bg-transparent text-2xl font-bold gradient-text focus:outline-none focus:ring-0 border-none gujarati">
+                    </div>
+                </div>
+                <div class="card stat-card rounded-2xl p-4">
+                    <div class="text-xs text-[var(--text-muted)] mb-2">Remaining Amount</div>
+                    <div id="remainingAmount" class="text-2xl font-bold text-orange-600">₹0</div>
+                </div>
+            </div>
+
+            <!-- Add Party Button -->
+            <button id="addPartyBtn" class="gradient-bg w-full py-3 rounded-xl text-white font-semibold mb-4 shadow-lg shadow-orange-500/30 hover:shadow-xl hover:shadow-orange-500/40 transition flex items-center justify-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+                Add Party
+            </button>
+
+            <!-- Party List -->
+            <div class="card rounded-2xl p-6">
+                <h3 class="font-semibold mb-4 text-base">Party List</h3>
+                <div id="partyList" class="space-y-3"></div>
+            </div>
+        </div>
+
+        <!-- Save Date View -->
+        <div id="saveDateView" class="view hidden">
+            <h2 class="text-xl font-bold mb-4">Saved Lists</h2>
+            
+            <!-- Manual Save Form -->
+            <div class="card rounded-2xl p-6 mb-4">
+                <h3 class="font-semibold mb-4 text-base">Manual Save</h3>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-2 text-[var(--text-muted)]">Shopping Date</label>
+                    <input type="date" id="shoppingDate" class="card w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-2 text-[var(--text-muted)]">Notes</label>
+                    <textarea id="dateNotes" rows="3" placeholder="Add any notes..." class="card w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"></textarea>
+                </div>
+                <button id="saveDateBtn" class="gradient-bg w-full py-3 rounded-xl text-white font-semibold shadow-lg shadow-orange-500/30 hover:shadow-xl hover:shadow-orange-500/40 transition">
+                    Save Current List
+                </button>
+            </div>
+
+            <!-- Bluetooth Printer Status -->
+            <div class="card rounded-2xl p-4 mb-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                        </svg>
+                        <span class="font-semibold text-sm">Thermal Printer</span>
+                    </div>
+                    <span id="printerStatus" class="text-xs px-3 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">Not Connected</span>
+                </div>
+                <button id="connectPrinterBtn" class="w-full py-2 rounded-lg bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 transition">
+                    Connect Printer
+                </button>
+            </div>
+
+            <div id="savedDates" class="space-y-3"></div>
+        </div>
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-[var(--card)] border-t border-[var(--border)] z-40">
+        <div class="max-w-2xl mx-auto grid grid-cols-5 gap-1">
+            <button class="bottom-nav-item active flex flex-col items-center py-3 px-2 transition" data-view="home">
+                <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+                </svg>
+                <span class="text-xs font-medium">Home</span>
+            </button>
+            <button class="bottom-nav-item flex flex-col items-center py-3 px-2 transition" data-view="list">
+                <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+                </svg>
+                <span class="text-xs font-medium">List</span>
+            </button>
+            <button class="bottom-nav-item flex flex-col items-center py-3 px-2 transition" data-view="category">
+                <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
+                </svg>
+                <span class="text-xs font-medium">Category</span>
+            </button>
+            <button class="bottom-nav-item flex flex-col items-center py-3 px-2 transition" data-view="payment">
+                <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
+                </svg>
+                <span class="text-xs font-medium">Payment</span>
+            </button>
+            <button class="bottom-nav-item flex flex-col items-center py-3 px-2 transition" data-view="saveDate">
+                <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
+                <span class="text-xs font-medium">Save Date</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Item Modal -->
+    <div id="itemModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-backdrop fade-in no-print">
+        <div class="card rounded-2xl p-6 w-full max-w-md slide-up">
+            <h3 id="itemModalTitle" class="text-xl font-bold mb-4">Add Item</h3>
+            <form id="itemForm" class="space-y-4">
+                <input type="hidden" id="itemId">
+                <div>
+                    <label class="block text-sm font-medium mb-2 text-[var(--text-muted)]">Item Name *</label>
+                    <input type="text" id="itemName" required class="card w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 gujarati">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2 text-[var(--text-muted)]">Category *</label>
+                    <select id="itemCategorySelect" required class="card w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 gujarati"></select>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium mb-2 text-[var(--text-muted)]">Quantity</label>
+                        <input type="number" id="itemQty" value="1" min="1" class="card w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2 text-[var(--text-muted)]">Price (₹)</label>
+                        <input type="number" id="itemPrice" value="0" min="0" class="card w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                </div>
+                <div class="flex gap-3 pt-2">
+                    <button type="button" id="cancelItemBtn" class="flex-1 card py-3 rounded-xl font-semibold">Cancel</button>
+                    <button type="submit" class="flex-1 gradient-bg py-3 rounded-xl text-white font-semibold">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Category Modal -->
+    <div id="categoryModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-backdrop fade-in no-print">
+        <div class="card rounded-2xl p-6 w-full max-w-md slide-up">
+            <h3 id="categoryModalTitle" class="text-xl font-bold mb-4">Add Category</h3>
+            <form id="categoryForm" class="space-y-4">
+                <input type="hidden" id="categoryId">
+                <div>
+                    <label class="block text-sm font-medium mb-2 text-[var(--text-muted)]">Category Name *</label>
+                    <input type="text" id="categoryName" required class="card w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 gujarati">
+                </div>
+                <div class="flex gap-3 pt-2">
+                    <button type="button" id="cancelCategoryBtn" class="flex-1 card py-3 rounded-xl font-semibold">Cancel</button>
+                    <button type="submit" class="flex-1 gradient-bg py-3 rounded-xl text-white font-semibold">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Party Modal -->
+    <div id="partyModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-backdrop fade-in no-print">
+        <div class="card rounded-2xl p-6 w-full max-w-md slide-up">
+            <h3 class="text-xl font-bold mb-4">Add Party</h3>
+            <form id="partyForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-2 text-[var(--text-muted)]">Party Name *</label>
+                    <input type="text" id="partyName" required class="card w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 gujarati">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2 text-[var(--text-muted)]">Amount *</label>
+                    <input type="number" id="partyAmount" required min="0" class="card w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2 text-[var(--text-muted)]">Payment Type *</label>
+                    <select id="partyPaymentType" required class="card w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="Cash">Cash</option>
+                        <option value="Online">Online</option>
+                    </select>
+                </div>
+                <div class="flex gap-3 pt-2">
+                    <button type="button" id="cancelPartyBtn" class="flex-1 card py-3 rounded-xl font-semibold">Cancel</button>
+                    <button type="submit" class="flex-1 gradient-bg py-3 rounded-xl text-white font-semibold">Save Party</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Print Preview Modal -->
+    <div id="printModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-backdrop fade-in no-print">
+        <div class="card rounded-2xl w-full max-w-2xl slide-up flex flex-col max-h-[90vh]">
+            <div class="p-6 border-b border-[var(--border)] flex items-center justify-between">
+                <h3 class="text-xl font-bold">Print Preview</h3>
+                <button id="closePrintModal" class="p-2 rounded-lg hover:bg-[var(--border)] transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div id="printContentWrapper" class="print-modal-content p-6 overflow-auto">
+                <div id="printContent" class="print-content"></div>
+            </div>
+            <div class="p-4 border-t border-[var(--border)] grid grid-cols-2 md:grid-cols-4 gap-2">
+                <button id="printNormalBtn" class="py-2 px-4 rounded-lg bg-green-500 text-white text-sm font-medium hover:bg-green-600 transition flex items-center justify-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+                    </svg>
+                    Print A4
+                </button>
+                <button id="thermal2InchBtn" class="py-2 px-4 rounded-lg bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 transition flex items-center justify-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
+                    </svg>
+                    2" Thermal
+                </button>
+                <button id="thermal3InchBtn" class="py-2 px-4 rounded-lg bg-purple-500 text-white text-sm font-medium hover:bg-purple-600 transition flex items-center justify-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
+                    </svg>
+                    3" Thermal
+                </button>
+                <button id="closePrintBtn" class="py-2 px-4 rounded-lg card font-medium text-sm hover:bg-[var(--border)] transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // State Management
+    let state = {
+        items: [],
+        categories: [],
+        homeItems: [],
+        parties: [],
+        totalAmountInput: 0,
+        activeView: 'home',
+        activeCategoryFilter: 'all',
+        searchQuery: '',
+        listCategoryFilter: 'all',
+        savedDates: [],
+        darkMode: false,
+        openMenuId: null,
+        printerDevice: null,
+        printerCharacteristic: null
+    };
+
+    // Initialize with sample data
+    function initData() {
+        const saved = localStorage.getItem('anmolShoppingData');
+        if (saved) {
+            state = { ...state, ...JSON.parse(saved) };
+        } else {
+            state.categories = [
+                { id: 1, name: 'Bhagvati' },
+                { id: 2, name: 'Mahadev' }
+            ];
+            state.items = [
+                { id: 1, name: '50 vali godri', categoryId: 1, qty: 12, price: 50 },
+                { id: 2, name: 'Safed bhareli godri gol', categoryId: 2, qty: 2, price: 400 },
+                { id: 3, name: 'Moti kit', categoryId: 2, qty: 6, price: 205 },
+                { id: 4, name: 'Moti gondri', categoryId: 1, qty: 6, price: 210 },
+                { id: 5, name: 'Cartoon vali side takiya gondri', categoryId: 1, qty: 6, price: 0 }
+            ];
+            state.homeItems = [
+                { id: 2, bought: true },
+                { id: 3, bought: false },
+                { id: 4, bought: false }
+            ];
+        }
+        if (!state.homeItems) state.homeItems = [];
+        if (!state.savedDates) state.savedDates = [];
+        if (!state.parties) state.parties = [];
+        if (state.totalAmountInput === undefined) state.totalAmountInput = 0;
+        
+        saveData();
+        updateDarkMode();
+    }
+
+    function saveData() {
+        localStorage.setItem('anmolShoppingData', JSON.stringify({
+            items: state.items,
+            categories: state.categories,
+            homeItems: state.homeItems,
+            parties: state.parties,
+            totalAmountInput: state.totalAmountInput,
+            savedDates: state.savedDates,
+            darkMode: state.darkMode
+        }));
+    }
+
+    function updateDarkMode() {
+        if (state.darkMode) {
+            document.documentElement.classList.add('dark');
+            document.getElementById('sunIcon').classList.add('hidden');
+            document.getElementById('moonIcon').classList.remove('hidden');
+        } else {
+            document.documentElement.classList.remove('dark');
+            document.getElementById('sunIcon').classList.remove('hidden');
+            document.getElementById('moonIcon').classList.add('hidden');
+        }
+    }
+
+    // Utility Functions
+    function generateId(arr) {
+        return arr.length > 0 ? Math.max(...arr.map(i => i.id)) + 1 : 1;
+    }
+
+    function getCategoryName(id) {
+        const cat = state.categories.find(c => c.id === id);
+        return cat ? cat.name : '';
+    }
+
+    function formatPrice(num) {
+        return `₹${num.toLocaleString('en-IN')}`;
+    }
+
+    function formatDateTime(dateStr) {
+        const date = new Date(dateStr);
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const day = date.getDate();
+        const month = months[date.getMonth()];
+        const year = date.getFullYear();
+        let hours = date.getHours();
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+        return `${day} ${month} ${year}, ${hours}:${minutes} ${ampm}`;
+    }
+
+    function isItemInHome(itemId) {
+        return state.homeItems.some(i => i.id === itemId);
+    }
+
+    function getHomeItem(itemId) {
+        return state.homeItems.find(i => i.id === itemId);
+    }
+
+    // Render Functions
+    function renderStats() {
+        const homeItems = state.items.filter(item => isItemInHome(item.id));
+        const totalItems = homeItems.reduce((sum, item) => sum + item.qty, 0);
+        const boughtCount = homeItems.filter(item => getHomeItem(item.id)?.bought).reduce((sum, item) => sum + item.qty, 0);
+        const totalAmount = homeItems.reduce((sum, item) => sum + (item.qty * item.price), 0);
+        
+        document.getElementById('totalItems').textContent = totalItems;
+        document.getElementById('boughtItems').textContent = `${boughtCount}/${totalItems}`;
+        document.getElementById('totalAmount').textContent = formatPrice(totalAmount);
+    }
+
+    function renderCategoryChips() {
+        const container = document.getElementById('homeCategoryChips');
+        const chips = ['<button class="chip px-5 py-2 rounded-full text-sm font-medium border border-[var(--border)] whitespace-nowrap ' + 
+                      (state.activeCategoryFilter === 'all' ? 'active' : '') + '" data-cat="all">ALL</button>'];
+        
+        state.categories.forEach(cat => {
+            const active = state.activeCategoryFilter === cat.id ? 'active' : '';
+            chips.push(`<button class="chip px-5 py-2 rounded-full text-sm font-medium border border-[var(--border)] whitespace-nowrap gujarati ${active}" data-cat="${cat.id}">${cat.name}</button>`);
+        });
+        
+        container.innerHTML = chips.join('');
+        
+        container.querySelectorAll('.chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                state.activeCategoryFilter = chip.dataset.cat === 'all' ? 'all' : parseInt(chip.dataset.cat);
+                renderHome();
+            });
+        });
+    }
+
+    function renderHomeItemCard(item) {
+        const homeItem = getHomeItem(item.id);
+        const boughtClass = homeItem?.bought ? 'item-bought' : '';
+        return `
+            <div class="card ${boughtClass} px-4 py-3 border-t border-[var(--border)]" data-item-id="${item.id}">
+                <div class="flex items-start gap-3">
+                    <input type="checkbox" ${homeItem?.bought ? 'checked' : ''} class="checkbox mt-1 w-5 h-5 rounded border-2 border-[var(--border)] cursor-pointer" data-action="toggle-home">
+                    <div class="w-16 h-16 bg-gradient-to-br from-orange-100 to-pink-100 dark:from-orange-900/20 dark:to-pink-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <svg class="w-8 h-8 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                        </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="item-name font-medium mb-2 gujarati text-sm">${item.name}</div>
+                        <div class="flex items-center gap-2 mb-2">
+                            <button class="w-8 h-8 rounded-lg bg-[var(--border)] flex items-center justify-center hover:bg-orange-500 hover:text-white transition" data-action="decrease-home">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg>
+                            </button>
+                            <span class="px-3 py-1 rounded-lg bg-[var(--bg)] font-semibold text-sm">${item.qty}</span>
+                            <button class="w-8 h-8 rounded-lg bg-[var(--border)] flex items-center justify-center hover:bg-orange-500 hover:text-white transition" data-action="increase-home">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                            </button>
+                            <div class="ml-auto text-right">
+                                <div class="font-bold text-orange-600">${formatPrice(item.price * item.qty)}</div>
+                                <div class="text-xs text-[var(--text-muted)]">${formatPrice(item.price)} each</div>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="text-[var(--text-muted)] hover:text-red-500 transition p-1" data-action="remove-from-home">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderListItemCard(item) {
+        const inHome = isItemInHome(item.id);
+        return `
+            <div class="list-item-card rounded-2xl p-4 shadow-sm" data-item-id="${item.id}">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="flex-1 min-w-0">
+                        <div class="font-semibold gujarati text-base mb-1">${item.name}</div>
+                        <div class="text-sm text-[var(--text-muted)] mb-2">Qty: ${item.qty}</div>
+                    </div>
+                    <div class="flex flex-col items-end gap-2">
+                        <div class="font-bold text-lg">₹${item.price}</div>
+                        <div class="flex items-center gap-2 relative">
+                            ${inHome ? `
+                                <button class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center shadow-lg shadow-green-500/30" data-action="remove-home">
+                                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
+                                </button>
+                            ` : `
+                                <button class="w-10 h-10 rounded-full pink-btn flex items-center justify-center shadow-lg shadow-pink-500/30 hover:shadow-xl hover:shadow-pink-500/40 transition" data-action="add-to-home">
+                                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path></svg>
+                                </button>
+                            `}
+                            <button class="w-10 h-10 rounded-lg hover:bg-[var(--border)] flex items-center justify-center transition" data-action="menu">
+                                <svg class="w-5 h-5 text-[var(--text)]" fill="currentColor" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="5" r="2"></circle>
+                                    <circle cx="12" cy="12" r="2"></circle>
+                                    <circle cx="12" cy="19" r="2"></circle>
+                                </svg>
+                            </button>
+                            ${state.openMenuId === item.id ? `
+                                <div class="menu-popup card rounded-xl shadow-2xl overflow-hidden min-w-[140px] fade-in">
+                                    <button class="w-full px-4 py-3 text-left hover:bg-[var(--border)] flex items-center gap-3 transition" data-action="edit">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                        <span class="text-sm font-medium">Edit</span>
+                                    </button>
+                                    <button class="w-full px-4 py-3 text-left hover:bg-[var(--border)] flex items-center gap-3 transition text-red-600" data-action="delete">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                        <span class="text-sm font-medium">Delete</span>
+                                    </button>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderHome() {
+        const homeItems = state.items.filter(item => isItemInHome(item.id));
+        let filteredItems = homeItems;
+        if (state.activeCategoryFilter !== 'all') {
+            filteredItems = filteredItems.filter(i => i.categoryId === state.activeCategoryFilter);
+        }
+        
+        renderStats();
+        renderCategoryChips();
+        
+        const container = document.getElementById('homeItemsList');
+        if (filteredItems.length === 0) {
+            container.innerHTML = '<div class="text-center py-12 text-[var(--text-muted)]">No items in shopping list. Add items from List tab.</div>';
+            return;
+        }
+
+        const grouped = {};
+        filteredItems.forEach(item => {
+            const catName = getCategoryName(item.categoryId);
+            if (!grouped[catName]) grouped[catName] = [];
+            grouped[catName].push(item);
+        });
+
+        let html = '';
+        Object.keys(grouped).forEach(catName => {
+            const items = grouped[catName];
+            const categoryTotal = items.reduce((sum, item) => sum + (item.qty * item.price), 0);
+            html += `<div class="mb-4">
+                <div class="gradient-bg text-white px-4 py-3 rounded-t-xl font-bold gujarati text-center text-base">${catName} (${items.length})</div>`;
+            items.forEach(item => {
+                html += renderHomeItemCard(item);
+            });
+            html += `
+                <div class="card px-4 py-3 border-t-2 border-orange-500 rounded-b-xl">
+                    <div class="text-right">
+                        <span class="text-sm text-[var(--text-muted)] mr-2">Total:</span>
+                        <span class="font-bold text-lg gradient-text">${formatPrice(categoryTotal)}</span>
+                    </div>
+                </div>
+            </div>`;
+        });
+        
+        container.innerHTML = html;
+        attachHomeEvents();
+    }
+
+    function renderListItems() {
+        const container = document.getElementById('listItemsList');
+        let items = state.items;
+        
+        if (state.listCategoryFilter !== 'all') {
+            items = items.filter(i => i.categoryId === parseInt(state.listCategoryFilter));
+        }
+        
+        if (state.searchQuery) {
+            items = items.filter(i => i.name.toLowerCase().includes(state.searchQuery.toLowerCase()));
+        }
+
+        if (items.length === 0) {
+            container.innerHTML = '<div class="text-center py-12 text-[var(--text-muted)]">No items found</div>';
+            return;
+        }
+
+        const grouped = {};
+        items.forEach(item => {
+            const catName = getCategoryName(item.categoryId);
+            if (!grouped[catName]) grouped[catName] = [];
+            grouped[catName].push(item);
+        });
+
+        let html = '';
+        Object.keys(grouped).forEach(catName => {
+            const count = grouped[catName].length;
+            html += `<div class="mb-4">
+                <div class="pink-btn text-white px-4 py-2 rounded-t-xl font-semibold gujarati text-sm flex items-center justify-between">
+                    <span>${catName}</span>
+                    <span class="bg-white/20 px-2 py-0.5 rounded-full text-xs">(${count})</span>
+                </div>
+                <div class="bg-[var(--border)] dark:bg-[var(--border)] rounded-b-xl p-3 space-y-3">`;
+            grouped[catName].forEach(item => {
+                html += renderListItemCard(item);
+            });
+            html += '</div></div>';
+        });
+        
+        container.innerHTML = html;
+        attachListEvents();
+    }
+
+    function renderList() {
+        renderFilterDropdown();
+        renderListItems();
+    }
+
+    function renderFilterDropdown() {
+        const select = document.getElementById('filterCategory');
+        const options = ['<option value="all">All Categories</option>'];
+        state.categories.forEach(cat => {
+            options.push(`<option value="${cat.id}" class="gujarati">${cat.name}</option>`);
+        });
+        select.innerHTML = options.join('');
+        select.value = state.listCategoryFilter;
+    }
+
+    function renderCategories() {
+        const container = document.getElementById('categoriesList');
+        document.getElementById('categoryCount').textContent = state.categories.length;
+        
+        if (state.categories.length === 0) {
+            container.innerHTML = '<div class="text-center py-12 text-[var(--text-muted)]">No categories yet</div>';
+            return;
+        }
+        
+        const html = state.categories.map(cat => {
+            const itemsInCat = state.items.filter(i => i.categoryId === cat.id);
+            const itemCount = itemsInCat.length;
+            const totalValue = itemsInCat.reduce((sum, i) => sum + (i.qty * i.price), 0);
+            
+            return `
+                <div class="card rounded-xl p-4 flex items-center justify-between" data-cat-id="${cat.id}">
+                    <div class="flex-1">
+                        <div class="font-semibold gujarati mb-1">${cat.name}</div>
+                        <div class="text-sm text-[var(--text-muted)]">${itemCount} items • ${formatPrice(totalValue)}</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button class="p-2 rounded-lg hover:bg-orange-50 dark:hover:bg-orange-900/20 transition" data-action="edit-cat">
+                            <svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                        </button>
+                        <button class="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition" data-action="delete-cat">
+                            <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        container.innerHTML = html;
+        
+        container.querySelectorAll('[data-action="edit-cat"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(e.target.closest('[data-cat-id]').dataset.catId);
+                editCategory(id);
+            });
+        });
+        
+        container.querySelectorAll('[data-action="delete-cat"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(e.target.closest('[data-cat-id]').dataset.catId);
+                deleteCategory(id);
+            });
+        });
+    }
+
+    function renderPayment() {
+        const totalAmount = state.totalAmountInput || 0;
+        const totalPartyAmount = state.parties.reduce((sum, p) => sum + p.amount, 0);
+        const remainingAmount = totalAmount - totalPartyAmount;
+
+        document.getElementById('totalAmountInput').value = totalAmount > 0 ? totalAmount : '';
+        document.getElementById('remainingAmount').textContent = formatPrice(Math.max(0, remainingAmount));
+
+        const container = document.getElementById('partyList');
+        if (state.parties.length === 0) {
+            container.innerHTML = '<div class="text-center py-8 text-[var(--text-muted)]">No parties added yet</div>';
+            return;
+        }
+        
+        const html = state.parties.map(party => `
+            <div class="card rounded-xl p-4 flex items-center justify-between hover:shadow-lg transition">
+                <div class="flex-1 min-w-0">
+                    <div class="font-semibold gujarati text-base">${party.name}</div>
+                    <div class="text-sm text-[var(--text-muted)] mt-1">${party.paymentType}</div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="font-bold text-lg gradient-text">${formatPrice(party.amount)}</div>
+                    <button class="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition" data-delete-party="${party.id}">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+        
+        container.innerHTML = html;
+        
+        container.querySelectorAll('[data-delete-party]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(e.target.closest('[data-delete-party]').dataset.deleteParty);
+                state.parties = state.parties.filter(p => p.id !== id);
+                saveData();
+                renderPayment();
+            });
+        });
+    }
+
+    function renderSavedDates() {
+        const container = document.getElementById('savedDates');
+        if (state.savedDates.length === 0) {
+            container.innerHTML = '<div class="text-center py-12 text-[var(--text-muted)]">No saved lists yet</div>';
+            return;
+        }
+        
+        container.innerHTML = state.savedDates.map((saved, idx) => {
+            const itemCount = saved.items.reduce((sum, item) => sum + item.qty, 0);
+            const total = saved.items.reduce((sum, item) => sum + (item.qty * item.price), 0);
+            return `
+                <div class="card rounded-xl p-4 hover:shadow-lg transition">
+                    <div class="flex justify-between items-start mb-3">
+                        <div class="flex-1">
+                            <div class="font-semibold text-base">${formatDateTime(saved.date)}</div>
+                            <div class="text-sm text-[var(--text-muted)] mt-1">${itemCount} items • ${formatPrice(total)}</div>
+                            ${saved.notes ? `<div class="text-xs text-[var(--text-muted)] mt-2 italic">${saved.notes}</div>` : ''}
+                        </div>
+                        <button class="text-red-500 hover:text-red-700 p-1" data-delete-idx="${idx}">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                    <button class="gradient-bg w-full py-2 rounded-lg text-white text-sm font-medium hover:shadow-lg transition" data-view-idx="${idx}">
+                        View & Print
+                    </button>
+                </div>
+            `;
+        }).join('');
+        
+        container.querySelectorAll('[data-view-idx]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.viewIdx);
+                showPrintPreview(state.savedDates[idx]);
+            });
+        });
+
+        container.querySelectorAll('[data-delete-idx]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (confirm('Delete this saved list?')) {
+                    const idx = parseInt(btn.dataset.deleteIdx);
+                    state.savedDates.splice(idx, 1);
+                    saveData();
+                    renderSavedDates();
+                }
+            });
+        });
+    }
+
+    // Print Functions
+    function generatePrintContent(savedList) {
+        const { date, items } = savedList;
+        
+        // Group by category
+        const grouped = {};
+        items.forEach(item => {
+            const catName = getCategoryName(item.categoryId);
+            if (!grouped[catName]) grouped[catName] = [];
+            grouped[catName].push(item);
+        });
+
+        // Calculate grand total
+        const grandTotal = items.reduce((sum, item) => sum + (item.qty * item.price), 0);
+
+        let html = `
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">ANMOL CHILDRENWEAR</div>
+                <div style="font-size: 14px; margin-bottom: 5px;">Shopping List</div>
+                <div style="font-size: 12px;">Date: ${formatDateTime(date)}</div>
+            </div>
+        `;
+
+        Object.keys(grouped).forEach(catName => {
+            const catItems = grouped[catName];
+            const catTotal = catItems.reduce((sum, item) => sum + (item.qty * item.price), 0);
+            
+            html += `
+                <div style="margin-top: 20px; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 2px solid #000;">
+                        <div style="flex: 1; text-align: center; font-weight: bold; font-size: 14px;">${catName}</div>
+                        <div style="font-weight: bold; font-size: 14px;">${catTotal}</div>
+                    </div>
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid #000;">
+                            <th style="text-align: left; padding: 5px; width: 40px;">No.</th>
+                            <th style="text-align: left; padding: 5px;">Name</th>
+                            <th style="text-align: center; padding: 5px; width: 50px;">Qty</th>
+                            <th style="text-align: right; padding: 5px; width: 60px;">Rate</th>
+                            <th style="text-align: right; padding: 5px; width: 70px;">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            catItems.forEach((item, idx) => {
+                html += `
+                    <tr style="border-bottom: 1px dotted #ccc;">
+                        <td style="padding: 5px;">${idx + 1}.</td>
+                        <td style="padding: 5px;">${item.name}</td>
+                        <td style="text-align: center; padding: 5px;">${item.qty}</td>
+                        <td style="text-align: right; padding: 5px;">${item.price}</td>
+                        <td style="text-align: right; padding: 5px;">${item.qty * item.price}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+        });
+
+        html += `
+            <div style="margin-top: 20px; padding-top: 10px; border-top: 2px solid #000; text-align: right;">
+                <div style="font-size: 16px; font-weight: bold;">Grand Total: ₹${grandTotal}</div>
+            </div>
+        `;
+
+        return html;
+    }
+
+    function showPrintPreview(savedList) {
+        const modal = document.getElementById('printModal');
+        const content = document.getElementById('printContent');
+        content.innerHTML = generatePrintContent(savedList);
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        state.currentPrintList = savedList;
+    }
+
+    function closePrintModal() {
+        document.getElementById('printModal').classList.add('hidden');
+        document.getElementById('printModal').classList.remove('flex');
+    }
+
+    function printNormal() {
+        window.print();
+    }
+
+    // Thermal Printer Functions - ESC/POS
+    function formatThermalText(savedList, width) {
+        const { date, items } = savedList;
+        const grandTotal = items.reduce((sum, item) => sum + (item.qty * item.price), 0);
+        
+        const center = (text) => {
+            const pad = Math.max(0, Math.floor((width - text.length) / 2));
+            return ' '.repeat(pad) + text;
+        };
+
+        const line = (char = '-') => char.repeat(width);
+        const padRight = (text, len) => (text + ' '.repeat(len)).substring(0, len);
+        const padLeft = (text, len) => (' '.repeat(len) + text).slice(-len);
+
+        let output = '\x1B\x40'; // Initialize printer
+        output += '\x1B\x61\x01'; // Center align
+        output += center('ANMOL CHILDRENWEAR') + '\n';
+        output += center('Shopping List') + '\n';
+        output += center(`Date: ${formatDateTime(date)}`) + '\n';
+        output += '\x1B\x61\x00'; // Left align
+        output += line() + '\n';
+
+        // Group by category
+        const grouped = {};
+        items.forEach(item => {
+            const catName = getCategoryName(item.categoryId);
+            if (!grouped[catName]) grouped[catName] = [];
+            grouped[catName].push(item);
+        });
+
+        Object.keys(grouped).forEach(catName => {
+            const catItems = grouped[catName];
+            const catTotal = catItems.reduce((sum, item) => sum + (item.qty * item.price), 0);
+            
+            output += '\x1B\x61\x01'; // Center
+            output += center(catName) + padLeft(catTotal.toString(), width - catName.length - Math.floor((width - catName.length) / 2)) + '\n';
+            output += '\x1B\x61\x00'; // Left
+            output += line() + '\n';
+            
+            if (width >= 48) {
+                // 3 inch - full table
+                output += padRight('No.', 4) + padRight('Name', 20) + padRight('Qty', 6) + padRight('Rate', 7) + padLeft('Total', 7) + '\n';
+            } else {
+                // 2 inch - compact
+                output += padRight('Item', 15) + padRight('Qty', 5) + padLeft('Total', 8) + '\n';
+            }
+            output += line() + '\n';
+
+            catItems.forEach((item, idx) => {
+                const itemTotal = item.qty * item.price;
+                if (width >= 48) {
+                    output += padRight((idx + 1) + '.', 4) + padRight(item.name.substring(0, 19), 20) + 
+                             padRight(item.qty.toString(), 6) + padRight(item.price.toString(), 7) + 
+                             padLeft(itemTotal.toString(), 7) + '\n';
+                } else {
+                    output += padRight(item.name.substring(0, 14), 15) + padRight(item.qty.toString(), 5) + 
+                             padLeft(itemTotal.toString(), 8) + '\n';
+                }
+            });
+            output += '\n';
+        });
+
+        output += line('=') + '\n';
+        output += '\x1B\x61\x02'; // Right align
+        output += '\x1B\x45\x01'; // Bold on
+        output += `Grand Total: ₹${grandTotal}\n`;
+        output += '\x1B\x45\x00'; // Bold off
+        output += '\x1B\x61\x00'; // Left align
+        output += '\n\n\n';
+        output += '\x1D\x56\x41\x03'; // Cut paper
+
+        return output;
+    }
+
+    async function connectBluetoothPrinter() {
+        try {
+            if (!navigator.bluetooth) {
+                alert('Web Bluetooth is not supported in this browser. Please use Chrome or Edge.');
+                return;
+            }
+
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ services: ['000018f0-0000-1000-8000-00805f9b34fb'] }],
+                optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb']
+            });
+
+            const server = await device.gatt.connect();
+            const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
+            const characteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
+
+            state.printerDevice = device;
+            state.printerCharacteristic = characteristic;
+            
+            document.getElementById('printerStatus').textContent = 'Connected';
+            document.getElementById('printerStatus').className = 'text-xs px-3 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400';
+            
+            alert('Printer connected successfully!');
+        } catch (error) {
+            console.error('Bluetooth error:', error);
+            alert('Failed to connect to printer. Make sure Bluetooth is enabled and printer is in pairing mode.');
+        }
+    }
+
+    async function printThermal(width) {
+        if (!state.currentPrintList) return;
+        
+        const text = formatThermalText(state.currentPrintList, width);
+        
+        if (!state.printerCharacteristic) {
+            alert('Please connect a Bluetooth printer first from Save Date tab.');
+            return;
+        }
+
+        try {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(text);
+            await state.printerCharacteristic.writeValue(data);
+            alert('Printed successfully!');
+        } catch (error) {
+            console.error('Print error:', error);
+            alert('Failed to print. Printer may be disconnected.');
+            state.printerDevice = null;
+            state.printerCharacteristic = null;
+            document.getElementById('printerStatus').textContent = 'Not Connected';
+            document.getElementById('printerStatus').className = 'text-xs px-3 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400';
+        }
+    }
+
+    // Event Handlers
+    function attachHomeEvents() {
+        document.querySelectorAll('[data-action="toggle-home"]').forEach(checkbox => {
+            checkbox.addEventListener('change', (e) => {
+                const id = parseInt(e.target.closest('[data-item-id]').dataset.itemId);
+                const homeItem = state.homeItems.find(i => i.id === id);
+                if (homeItem) {
+                    homeItem.bought = e.target.checked;
+                    saveData();
+                    renderHome();
+                }
+            });
+        });
+        
+        document.querySelectorAll('[data-action="increase-home"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(e.target.closest('[data-item-id]').dataset.itemId);
+                const item = state.items.find(i => i.id === id);
+                item.qty++;
+                saveData();
+                renderHome();
+            });
+        });
+        
+        document.querySelectorAll('[data-action="decrease-home"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(e.target.closest('[data-item-id]').dataset.itemId);
+                const item = state.items.find(i => i.id === id);
+                if (item.qty > 1) {
+                    item.qty--;
+                    saveData();
+                    renderHome();
+                }
+            });
+        });
+        
+        document.querySelectorAll('[data-action="remove-from-home"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(e.target.closest('[data-item-id]').dataset.itemId);
+                state.homeItems = state.homeItems.filter(i => i.id !== id);
+                saveData();
+                renderHome();
+            });
+        });
+    }
+
+    function attachListEvents() {
+        document.querySelectorAll('[data-action="add-to-home"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(e.target.closest('[data-item-id]').dataset.itemId);
+                if (!isItemInHome(id)) {
+                    state.homeItems.push({ id, bought: false });
+                    saveData();
+                    renderList();
+                }
+            });
+        });
+
+        document.querySelectorAll('[data-action="remove-home"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(e.target.closest('[data-item-id]').dataset.itemId);
+                state.homeItems = state.homeItems.filter(i => i.id !== id);
+                saveData();
+                renderList();
+            });
+        });
+        
+        document.querySelectorAll('[data-action="menu"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = parseInt(e.target.closest('[data-item-id]').dataset.itemId);
+                state.openMenuId = state.openMenuId === id ? null : id;
+                renderList();
+            });
+        });
+        
+        document.querySelectorAll('[data-action="edit"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = parseInt(e.target.closest('[data-item-id]').dataset.itemId);
+                const item = state.items.find(i => i.id === id);
+                state.openMenuId = null;
+                openItemModal(item);
+            });
+        });
+        
+        document.querySelectorAll('[data-action="delete"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                if (confirm('Delete this item?')) {
+                    const id = parseInt(e.target.closest('[data-item-id]').dataset.itemId);
+                    state.items = state.items.filter(i => i.id !== id);
+                    state.homeItems = state.homeItems.filter(i => i.id !== id);
+                    state.openMenuId = null;
+                    saveData();
+                    renderList();
+                }
+            });
+        });
+    }
+
+    function switchView(view) {
+        state.activeView = view;
+        state.openMenuId = null;
+        document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+        document.getElementById(view + 'View').classList.remove('hidden');
+        
+        document.querySelectorAll('.bottom-nav-item').forEach(item => {
+            item.classList.remove('active');
+            if (item.dataset.view === view) item.classList.add('active');
+        });
+        
+        renderView();
+    }
+
+    function renderView() {
+        switch(state.activeView) {
+            case 'home': renderHome(); break;
+            case 'list': renderList(); break;
+            case 'category': renderCategories(); break;
+            case 'payment': renderPayment(); break;
+            case 'saveDate': renderSavedDates(); break;
+        }
+    }
+
+    // Save List Function
+    function saveCurrentList(notes = '') {
+        const homeItems = state.items.filter(item => isItemInHome(item.id));
+        if (homeItems.length === 0) {
+            alert('No items in shopping list to save');
+            return;
+        }
+
+        const savedList = {
+            date: new Date().toISOString(),
+            items: homeItems.map(item => ({
+                id: item.id,
+                name: item.name,
+                categoryId: item.categoryId,
+                qty: item.qty,
+                price: item.price
+            })),
+            notes: notes
+        };
+
+        state.savedDates.unshift(savedList);
+        saveData();
+        
+        if (state.activeView !== 'saveDate') {
+            alert('List saved successfully! Check Save Date tab.');
+        } else {
+            renderSavedDates();
+            alert('List saved successfully!');
+        }
+    }
+
+    // Modal Functions
+    function openItemModal(item = null) {
+        const modal = document.getElementById('itemModal');
+        const form = document.getElementById('itemForm');
+        form.reset();
+        
+        const select = document.getElementById('itemCategorySelect');
+        select.innerHTML = state.categories.map(c => `<option value="${c.id}" class="gujarati">${c.name}</option>`).join('');
+        
+        if (item) {
+            document.getElementById('itemModalTitle').textContent = 'Edit Item';
+            document.getElementById('itemId').value = item.id;
+            document.getElementById('itemName').value = item.name;
+            document.getElementById('itemCategorySelect').value = item.categoryId;
+            document.getElementById('itemQty').value = item.qty;
+            document.getElementById('itemPrice').value = item.price;
+        } else {
+            document.getElementById('itemModalTitle').textContent = 'Add Item';
+            document.getElementById('itemId').value = '';
+        }
+        
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    function closeItemModal() {
+        document.getElementById('itemModal').classList.add('hidden');
+        document.getElementById('itemModal').classList.remove('flex');
+    }
+
+    function openCategoryModal(category = null) {
+        const modal = document.getElementById('categoryModal');
+        const form = document.getElementById('categoryForm');
+        form.reset();
+        
+        if (category) {
+            document.getElementById('categoryModalTitle').textContent = 'Edit Category';
+            document.getElementById('categoryId').value = category.id;
+            document.getElementById('categoryName').value = category.name;
+        } else {
+            document.getElementById('categoryModalTitle').textContent = 'Add Category';
+            document.getElementById('categoryId').value = '';
+        }
+        
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    function closeCategoryModal() {
+        document.getElementById('categoryModal').classList.add('hidden');
+        document.getElementById('categoryModal').classList.remove('flex');
+    }
+
+    function openPartyModal() {
+        const modal = document.getElementById('partyModal');
+        const form = document.getElementById('partyForm');
+        form.reset();
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    function closePartyModal() {
+        document.getElementById('partyModal').classList.add('hidden');
+        document.getElementById('partyModal').classList.remove('flex');
+    }
+
+    function editCategory(id) {
+        const category = state.categories.find(c => c.id === id);
+        openCategoryModal(category);
+    }
+
+    function deleteCategory(id) {
+        const hasItems = state.items.some(i => i.categoryId === id);
+        if (hasItems) {
+            alert('Cannot delete category with items. Please move or delete items first.');
+            return;
+        }
+        if (confirm('Delete this category?')) {
+            state.categories = state.categories.filter(c => c.id !== id);
+            saveData();
+            renderCategories();
+        }
+    }
+
+    // Initialize Event Listeners
+    document.addEventListener('DOMContentLoaded', () => {
+        initData();
+        renderHome();
+
+        // Dark mode toggle
+        document.getElementById('darkModeToggle').addEventListener('click', () => {
+            state.darkMode = !state.darkMode;
+            saveData();
+            updateDarkMode();
+        });
+
+        // Bottom nav
+        document.querySelectorAll('.bottom-nav-item').forEach(item => {
+            item.addEventListener('click', () => switchView(item.dataset.view));
+        });
+
+        // Save List Button
+        document.getElementById('saveListBtn').addEventListener('click', () => {
+            saveCurrentList();
+        });
+
+        // Add Item
+        document.getElementById('addItemBtn').addEventListener('click', () => openItemModal());
+        document.getElementById('cancelItemBtn').addEventListener('click', closeItemModal);
+        
+        document.getElementById('itemForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const id = document.getElementById('itemId').value;
+            const itemData = {
+                name: document.getElementById('itemName').value,
+                categoryId: parseInt(document.getElementById('itemCategorySelect').value),
+                qty: parseInt(document.getElementById('itemQty').value),
+                price: parseInt(document.getElementById('itemPrice').value)
+            };
+            
+            if (id) {
+                const item = state.items.find(i => i.id === parseInt(id));
+                Object.assign(item, itemData);
+            } else {
+                itemData.id = generateId(state.items);
+                state.items.push(itemData);
+            }
+            
+            saveData();
+            closeItemModal();
+            renderView();
+        });
+
+        // Add Category
+        document.getElementById('addCategoryBtn').addEventListener('click', () => openCategoryModal());
+        document.getElementById('cancelCategoryBtn').addEventListener('click', closeCategoryModal);
+        
+        document.getElementById('categoryForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const id = document.getElementById('categoryId').value;
+            const name = document.getElementById('categoryName').value;
+            
+            if (id) {
+                const category = state.categories.find(c => c.id === parseInt(id));
+                category.name = name;
+            } else {
+                state.categories.push({ id: generateId(state.categories), name });
+            }
+            
+            saveData();
+            closeCategoryModal();
+            renderCategories();
+        });
+
+        // Payment - Total Amount Input
+        document.getElementById('totalAmountInput').addEventListener('input', (e) => {
+            state.totalAmountInput = parseFloat(e.target.value) || 0;
+            saveData();
+            renderPayment();
+        });
+
+        // Payment - Add Party
+        document.getElementById('addPartyBtn').addEventListener('click', () => openPartyModal());
+        document.getElementById('cancelPartyBtn').addEventListener('click', closePartyModal);
+        
+        document.getElementById('partyForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const partyData = {
+                id: generateId(state.parties),
+                name: document.getElementById('partyName').value,
+                amount: parseFloat(document.getElementById('partyAmount').value),
+                paymentType: document.getElementById('partyPaymentType').value
+            };
+            
+            state.parties.push(partyData);
+            saveData();
+            closePartyModal();
+            renderPayment();
+        });
+
+        // Search & Filter
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            state.searchQuery = e.target.value;
+            renderList();
+        });
+
+        document.getElementById('filterCategory').addEventListener('change', (e) => {
+            state.listCategoryFilter = e.target.value;
+            renderList();
+        });
+
+        // Export
+        document.getElementById('exportBtn').addEventListener('click', () => {
+            const dataStr = JSON.stringify(state, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `anmol-shopping-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+        });
+
+        // Import
+        document.getElementById('importBtn').addEventListener('click', () => {
+            document.getElementById('importFile').click();
+        });
+
+        document.getElementById('importFile').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const imported = JSON.parse(event.target.result);
+                        state = { ...state, ...imported };
+                        if (!state.homeItems) state.homeItems = [];
+                        if (!state.savedDates) state.savedDates = [];
+                        if (!state.parties) state.parties = [];
+                        if (state.totalAmountInput === undefined) state.totalAmountInput = 0;
+                        saveData();
+                        renderView();
+                        alert('Data imported successfully!');
+                    } catch (err) {
+                        alert('Invalid file format');
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        // Backup
+        document.getElementById('backupBtn').addEventListener('click', () => {
+            saveData();
+            alert('Data backed up to localStorage!');
+        });
+
+        // Manual Save Date
+        document.getElementById('saveDateBtn').addEventListener('click', () => {
+            const date = document.getElementById('shoppingDate').value;
+            const notes = document.getElementById('dateNotes').value;
+            
+            if (!date) {
+                alert('Please select a date');
+                return;
+            }
+            
+            const homeItems = state.items.filter(item => isItemInHome(item.id));
+            if (homeItems.length === 0) {
+                alert('No items in shopping list to save');
+                return;
+            }
+
+            const savedList = {
+                date: new Date(date).toISOString(),
+                items: homeItems.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    categoryId: item.categoryId,
+                    qty: item.qty,
+                    price: item.price
+                })),
+                notes: notes
+            };
+
+            state.savedDates.unshift(savedList);
+            saveData();
+            document.getElementById('shoppingDate').value = '';
+            document.getElementById('dateNotes').value = '';
+            renderSavedDates();
+            alert('List saved successfully!');
+        });
+
+        // Print Modal Events
+        document.getElementById('closePrintModal').addEventListener('click', closePrintModal);
+        document.getElementById('closePrintBtn').addEventListener('click', closePrintModal);
+        document.getElementById('printNormalBtn').addEventListener('click', printNormal);
+        document.getElementById('thermal2InchBtn').addEventListener('click', () => printThermal(32));
+        document.getElementById('thermal3InchBtn').addEventListener('click', () => printThermal(48));
+
+        // Bluetooth Printer Connect
+        document.getElementById('connectPrinterBtn').addEventListener('click', connectBluetoothPrinter);
+
+        // Close modals on backdrop click
+        document.getElementById('itemModal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeItemModal();
+        });
+        
+        document.getElementById('categoryModal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeCategoryModal();
+        });
+
+        document.getElementById('partyModal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closePartyModal();
+        });
+
+        document.getElementById('printModal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closePrintModal();
+        });
+
+        // Close menu popup when clicking outside
+        document.addEventListener('click', (e) => {
+            if (state.openMenuId && !e.target.closest('[data-action="menu"]') && !e.target.closest('.menu-popup')) {
+                state.openMenuId = null;
+                renderList();
+            }
+        });
+    });
+</script>
+<script>(function(){document.addEventListener("click",function(e){var a=e.target.closest("[data-product-id]");if(!a)return;e.preventDefault();var pid=a.getAttribute("data-product-id");if(pid)parent.postMessage({type:"ecto-artifact-link-click",productId:pid},"*")})})();</script>
+</body>
+</html>
